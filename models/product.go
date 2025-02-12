@@ -11,7 +11,7 @@ type Product struct {
 	Name        string        `bson:"name"`
 	Description string        `bson:"description"`
 	Price       float64       `bson:"price"`
-	CategoryID  bson.ObjectID `bson:"category_id"`
+	CategoryID  string        `bson:"category_id"`
 	Stock       int           `bson:"stock"`
 	CreatedAt   time.Time     `bson:"created_at"`
 	UpdatedAt   time.Time     `bson:"updated_at"`
