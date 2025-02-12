@@ -9,21 +9,30 @@ import (
 )
 
 func main() {
-    r := gin.Default()
+    router := gin.Default()
 
     // Connect to MongoDB
-    db := config.ConnectDB()
+    dbCli := config.ConnectDB()
 
+
+    
     // Initialize services
-    productService := services.NewProductService(db)
-
+    productService := services.NewProductService(dbCli)
     // Initialize controllers
     productController := controllers.NewProductController(productService)
-
     // Register routes
-    routes.ProductRoutes(r, productController)
+    routes.ProductRoutes(router, productController)
+
+
+
+
+    // Initialize services
+    authService  := services.NewAuthService(dbCli)
+	// Register routes
+	routes.AuthRoutes(router, authService) // Auth routes
+
 
     // Start the server
-    r.Run(":8080")
+    router.Run(":8080")
 }
 

@@ -3,44 +3,49 @@ package middleware
 import (
 	"net/http"
 	"strings"
+	"time"
+
 	"epi/utils"
-	"github.com/gin-gonic/gin" 
+
+	"github.com/gin-gonic/gin"
 )
 
-// AuthMiddleware is a middleware for JWT token authentication
-func AuthMiddleware(requiredRole string) gin.HandlerFunc {
+// AuthMiddleware checks for a valid JWT token.
+func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Extract token from Authorization header
-		tokenString := c.GetHeader("Authorization")
-		if tokenString == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		// Get the Authorization header (should be "Bearer <token>")
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing"})
 			c.Abort()
 			return
 		}
 
-		// Remove the "Bearer " prefix from the token string
-		tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header format must be Bearer {token}"})
+			c.Abort()
+			return
+		}
 
-		// Parse and validate the token
-		claims, err := utils.ParseToken(tokenString)
+		tokenStr := parts[1]
+		claims, err := utils.ValidateToken(tokenStr)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: " + err.Error()})
 			c.Abort()
 			return
 		}
 
-		// Check if the user has the required role
-		if requiredRole != "" && claims["role"] != requiredRole {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Insufficient role"})
+		// Check if token has expired.
+		if time.Now().Unix() > claims.ExpiresAt {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token expired"})
 			c.Abort()
 			return
 		}
 
-		// Pass user claims to the context
-		c.Set("userID", claims["sub"])
-		c.Set("role", claims["role"])
-
-		// Continue with the request
+		// Set user information in context for downstream handlers.
+		c.Set("user_id", claims.ID)
+		c.Set("role", claims.Role)
 		c.Next()
 	}
 }
