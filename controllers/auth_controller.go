@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AuthController handles authentication-related HTTP requests.
+// AuthController handles authentication requests.
 type AuthController struct {
 	AuthService *services.AuthService
 }
@@ -21,72 +21,73 @@ func NewAuthController(authService *services.AuthService) *AuthController {
 	return &AuthController{AuthService: authService}
 }
 
-// SignUp registers a new user and sends an OTP.
-func (ac *AuthController) SignUp(c *gin.Context) {
-	var signUpData models.SignUpData
-	if err := c.ShouldBindJSON(&signUpData); err != nil {
+// SignupOTP handles sign-up via OTP (phone number only, no password).
+func (ac *AuthController) SignupOTP(c *gin.Context) {
+	var req struct {
+		PhoneNumber string `json:"phone_number" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Create a new user with a "pending" role.
-	user := models.User{
-		PhoneNumber: signUpData.PhoneNumber,
-		Password:    signUpData.Password, // In production, hash the password!
-		Role:        "pending",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+	// Check if user exists. If not, create a new one with role "pending".
+	user, _ := ac.AuthService.GetUserByPhoneNumber(req.PhoneNumber)
+	if user == nil {
+		newUser := models.User{
+			PhoneNumber: req.PhoneNumber,
+			Role:        "pending",
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		if err := ac.AuthService.SaveUser(newUser); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
-	// Save the user (fails if the phone number already exists).
-	if err := ac.AuthService.SaveUser(user); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Generate a dummy OTP.
+	// Generate OTP (dummy)
 	otp := utils.GenerateOTP()
 
-	// Save the OTP in the user's record.
-	if err := ac.AuthService.SaveOtpCode(signUpData.PhoneNumber, otp); err != nil {
+	// Save OTP for the user.
+	if err := ac.AuthService.SaveOtpCode(req.PhoneNumber, otp); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save OTP"})
 		return
 	}
 
-	// (Optionally) send the OTP via SMS using utils.SendSMS.
-
-	c.JSON(http.StatusOK, gin.H{"message": "User registered. OTP sent to phone number."})
+	// (Optionally) Send the OTP via SMS using utils.SendSMS.
+	c.JSON(http.StatusOK, gin.H{"message": "OTP sent successfully"})
 }
 
-// VerifyOTP verifies the provided OTP; if valid, it updates the user’s role and returns a JWT.
+// VerifyOTP verifies the OTP sent to the user and returns a JWT token.
 func (ac *AuthController) VerifyOTP(c *gin.Context) {
-	var otpData models.OtpVerification
-	if err := c.ShouldBindJSON(&otpData); err != nil {
+	var req models.OtpVerification
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Verify that the OTP is correct.
-	valid, err := ac.AuthService.VerifyOtpCode(otpData.PhoneNumber, otpData.OtpCode)
+	// Verify the OTP.
+	valid, err := ac.AuthService.VerifyOtpCode(req.PhoneNumber, req.OtpCode)
 	if err != nil || !valid {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired OTP"})
 		return
 	}
 
-	// Retrieve the user record.
-	user, err := ac.AuthService.GetUserByPhoneNumber(otpData.PhoneNumber)
+	// Update user's role to "customer".
+	if err := ac.AuthService.UpdateUserRole(req.PhoneNumber, "customer"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user role"})
+		return
+	}
+
+	// Retrieve the user.
+	user, err := ac.AuthService.GetUserByPhoneNumber(req.PhoneNumber)
 	if err != nil || user == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "User not found"})
 		return
 	}
 
-	// Update the user role to "customer" after successful OTP verification.
-	if err := ac.AuthService.UpdateUserRole(otpData.PhoneNumber, "customer"); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user role"})
-		return
-	}
-
-	// Generate a JWT token.
+	// Generate JWT token.
 	token, err := utils.GenerateToken(*user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
@@ -96,21 +97,65 @@ func (ac *AuthController) VerifyOTP(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "OTP verified successfully", "token": token})
 }
 
-// GenerateOTP is an optional endpoint to regenerate an OTP.
-func (ac *AuthController) GenerateOTP(c *gin.Context) {
-	var req struct {
-		PhoneNumber string `json:"phone_number" binding:"required"`
-	}
+// SignupWithPassword registers a new user with a phone number and password.
+func (ac *AuthController) SignupWithPassword(c *gin.Context) {
+	var req models.SignUpData
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	otp := utils.GenerateOTP()
-	if err := ac.AuthService.SaveOtpCode(req.PhoneNumber, otp); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate OTP"})
+	// Check if user already exists.
+	user, _ := ac.AuthService.GetUserByPhoneNumber(req.PhoneNumber)
+	if user != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "User already exists"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "OTP generated and saved"})
+	// Create a new user with the password (password should be hashed in production).
+	newUser := models.User{
+		PhoneNumber: req.PhoneNumber,
+		Password:    req.Password,
+		Role:        "customer",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	if err := ac.AuthService.SaveUser(newUser); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Generate JWT token.
+	token, err := utils.GenerateToken(newUser)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully", "token": token})
+}
+
+// LoginWithPassword logs in a user using phone number and password.
+func (ac *AuthController) LoginWithPassword(c *gin.Context) {
+	var req models.SignUpData // Reusing SignUpData struct: phone_number and password.
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := ac.AuthService.LoginUser(req.PhoneNumber, req.Password)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Generate JWT token.
+	token, err := utils.GenerateToken(*user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Login successful", "token": token})
 }

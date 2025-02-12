@@ -10,10 +10,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AuthMiddleware checks for a valid JWT token.
+// AuthMiddleware validates the JWT token.
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get the Authorization header (should be "Bearer <token>")
+		// Get the Authorization header.
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing"})
@@ -36,14 +36,14 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Check if token has expired.
+		// Check expiration.
 		if time.Now().Unix() > claims.ExpiresAt {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token expired"})
 			c.Abort()
 			return
 		}
 
-		// Set user information in context for downstream handlers.
+		// Set user details in context.
 		c.Set("user_id", claims.ID)
 		c.Set("role", claims.Role)
 		c.Next()

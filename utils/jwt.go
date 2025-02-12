@@ -8,13 +8,13 @@ import (
 	"epi/models"
 )
 
-// JWT_SECRET is used to sign tokens.
+// JWT_SECRET is used for signing tokens.
 var JWT_SECRET = []byte("your-secret-key")
 
-// JwtCustomClaims defines the custom JWT claims.
+// JwtCustomClaims defines custom JWT claims.
 type JwtCustomClaims struct {
-	ID   string `json:"id"`   // Using the phone number as ID
-	Role string `json:"role"` // e.g., "customer" or "admin"
+	ID   string `json:"id"`   // We'll use the phone number as the identifier.
+	Role string `json:"role"` // "customer" or "admin"
 	jwt.StandardClaims
 }
 
@@ -33,7 +33,7 @@ func GenerateToken(user models.User) (string, error) {
 	return token.SignedString(JWT_SECRET)
 }
 
-// ValidateToken parses and validates the JWT token.
+// ValidateToken parses and validates a JWT token.
 func ValidateToken(tokenStr string) (*JwtCustomClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JwtCustomClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return JWT_SECRET, nil

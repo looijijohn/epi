@@ -25,24 +25,22 @@ func NewAuthService(db *mongo.Client) *AuthService {
 }
 
 // SaveUser inserts a new user into the database.
-// Returns an error if a user with the same phone number already exists.
 func (as *AuthService) SaveUser(user models.User) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Check if a user with the given phone number already exists.
+	// Check if a user with the same phone number already exists.
 	var existing models.User
 	err := as.Collection.FindOne(ctx, bson.M{"phone_number": user.PhoneNumber}).Decode(&existing)
 	if err == nil {
 		return errors.New("user already exists")
 	}
 
-	// Insert the new user.
 	_, err = as.Collection.InsertOne(ctx, user)
 	return err
 }
 
-// GetUserByPhoneNumber returns the user with the specified phone number.
+// GetUserByPhoneNumber retrieves a user by phone number.
 func (as *AuthService) GetUserByPhoneNumber(phoneNumber string) (*models.User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -55,7 +53,7 @@ func (as *AuthService) GetUserByPhoneNumber(phoneNumber string) (*models.User, e
 	return &user, nil
 }
 
-// SaveOtpCode updates the OTPCode field of the user with the given phone number.
+// SaveOtpCode updates the OTPCode field for the given phone number.
 func (as *AuthService) SaveOtpCode(phoneNumber, otp string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -66,17 +64,17 @@ func (as *AuthService) SaveOtpCode(phoneNumber, otp string) error {
 			"updated_at": time.Now(),
 		},
 	}
-	result, err := as.Collection.UpdateOne(ctx, bson.M{"phone_number": phoneNumber}, update)
+	res, err := as.Collection.UpdateOne(ctx, bson.M{"phone_number": phoneNumber}, update)
 	if err != nil {
 		return err
 	}
-	if result.MatchedCount == 0 {
+	if res.MatchedCount == 0 {
 		return errors.New("user not found")
 	}
 	return nil
 }
 
-// VerifyOtpCode compares the provided OTP with the stored OTP.
+// VerifyOtpCode checks if the provided OTP matches the stored OTP.
 func (as *AuthService) VerifyOtpCode(phoneNumber, otp string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -92,7 +90,7 @@ func (as *AuthService) VerifyOtpCode(phoneNumber, otp string) (bool, error) {
 	return true, nil
 }
 
-// UpdateUserRole updates the role of the user identified by phone number.
+// UpdateUserRole updates the user's role.
 func (as *AuthService) UpdateUserRole(phoneNumber, role string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -103,12 +101,30 @@ func (as *AuthService) UpdateUserRole(phoneNumber, role string) error {
 			"updated_at": time.Now(),
 		},
 	}
-	result, err := as.Collection.UpdateOne(ctx, bson.M{"phone_number": phoneNumber}, update)
+	res, err := as.Collection.UpdateOne(ctx, bson.M{"phone_number": phoneNumber}, update)
 	if err != nil {
 		return err
 	}
-	if result.MatchedCount == 0 {
+	if res.MatchedCount == 0 {
 		return errors.New("user not found")
 	}
 	return nil
+}
+
+// LoginUser verifies the user's password and returns the user record.
+func (as *AuthService) LoginUser(phoneNumber, password string) (*models.User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var user models.User
+	err := as.Collection.FindOne(ctx, bson.M{"phone_number": phoneNumber}).Decode(&user)
+	if err != nil {
+		return nil, errors.New("user not found")
+	}
+
+	// In production, compare hashed passwords.
+	if user.Password != password {
+		return nil, errors.New("incorrect password")
+	}
+	return &user, nil
 }

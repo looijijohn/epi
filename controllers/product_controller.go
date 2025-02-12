@@ -1,123 +1,104 @@
 package controllers
 
 import (
-    "net/http"
-    "epi/models"
-    "epi/services"
-    "epi/utils" // Import the utils package
-    "go.mongodb.org/mongo-driver/v2/bson"
-    "github.com/gin-gonic/gin"
+	"net/http"
+	"time"
+
+	"epi/models"
+	"epi/services"
+
+	"github.com/gin-gonic/gin"
 )
 
 type ProductController struct {
-    ProductService *services.ProductService
+	ProductService *services.ProductService
 }
 
 func NewProductController(productService *services.ProductService) *ProductController {
-    return &ProductController{ProductService: productService}
+	return &ProductController{ProductService: productService}
 }
 
-// GetProducts retrieves all products
+// GetProducts returns a list of all products (accessible by all users).
 func (pc *ProductController) GetProducts(c *gin.Context) {
-    products, err := pc.ProductService.GetAllProducts()
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, utils.ApiErrorResponse{
-            Status:  false,
-            Message: err.Error(),
-        })
-        return
-    }
-    c.JSON(http.StatusOK, utils.ApiResponse{
-        Status: true,
-        Data:   products,
-    })
+	products, err := pc.ProductService.GetAllProducts()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, products)
 }
 
-// CreateProduct creates a new product
+// CreateProduct allows admin users to create a new product.
 func (pc *ProductController) CreateProduct(c *gin.Context) {
-    var product models.Product
-    if err := c.ShouldBindJSON(&product); err != nil {
-        c.JSON(http.StatusBadRequest, utils.ApiErrorResponse{
-            Status:  false,
-            Message: err.Error(),
-        })
-        return
-    }
+	// Check user role from context (set by your JWT middleware)
+	role, exists := c.Get("role")
+	if !exists || role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied. Admin only."})
+		return
+	}
 
-    insertedID, err := pc.ProductService.CreateProduct(product)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, utils.ApiErrorResponse{
-            Status:  false,
-            Message: err.Error(),
-        })
-        return
-    }
+	var product models.Product
+	if err := c.ShouldBindJSON(&product); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-    c.JSON(http.StatusCreated, utils.ApiResponse{
-        Status: true,
-        Data:   gin.H{"inserted_id": insertedID},
-    })
+	product.CreatedAt = time.Now()
+	product.UpdatedAt = time.Now()
+
+	if err := pc.ProductService.CreateProduct(&product); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"message": "Product created successfully"})
 }
 
-// DeleteProduct deletes a product by ID
-func (pc *ProductController) DeleteProduct(c *gin.Context) {
-    productID := c.Param("id")
-    objectID, err := bson.ObjectIDFromHex(productID)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, utils.ApiErrorResponse{
-            Status:  false,
-            Message: "Invalid product ID",
-        })
-        return
-    }
-
-    err = pc.ProductService.DeleteProduct(objectID)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, utils.ApiErrorResponse{
-            Status:  false,
-            Message: err.Error(),
-        })
-        return
-    }
-
-    c.JSON(http.StatusOK, utils.ApiResponse{
-        Status: true,
-        Data:   gin.H{"message": "Product deleted successfully"},
-    })
-}
-
-// UpdateProduct updates a product by ID
+// UpdateProduct allows admin users to update an existing product.
 func (pc *ProductController) UpdateProduct(c *gin.Context) {
-    productID := c.Param("id")
-    objectID, err := bson.ObjectIDFromHex(productID)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, utils.ApiErrorResponse{
-            Status:  false,
-            Message: "Invalid product ID",
-        })
-        return
-    }
+	// Ensure only admin users can update products.
+	role, exists := c.Get("role")
+	if !exists || role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied. Admin only."})
+		return
+	}
 
-    var updatedProduct models.Product
-    if err := c.ShouldBindJSON(&updatedProduct); err != nil {
-        c.JSON(http.StatusBadRequest, utils.ApiErrorResponse{
-            Status:  false,
-            Message: err.Error(),
-        })
-        return
-    }
+	id := c.Param("id")
+	var updatedProduct models.Product
+	if err := c.ShouldBindJSON(&updatedProduct); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-    err = pc.ProductService.UpdateProduct(objectID, updatedProduct)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, utils.ApiErrorResponse{
-            Status:  false,
-            Message: err.Error(),
-        })
-        return
-    }
+	if err := pc.ProductService.UpdateProduct(id, updatedProduct); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
-    c.JSON(http.StatusOK, utils.ApiResponse{
-        Status: true,
-        Data:   gin.H{"message": "Product updated successfully"},
-    })
+	c.JSON(http.StatusOK, gin.H{"message": "Product updated successfully"})
+}
+
+// DeleteProduct allows admin users to delete a product.
+func (pc *ProductController) DeleteProduct(c *gin.Context) {
+	// Ensure only admin users can delete products.
+	role, exists := c.Get("role")
+	if !exists || role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied. Admin only."})
+		return
+	}
+
+	id := c.Param("id")
+	err := pc.ProductService.DeleteProduct(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"status":  false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  true,
+		"message": "Product deleted successfully",
+	})
 }
