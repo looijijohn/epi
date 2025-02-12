@@ -24,6 +24,6 @@ func main() {
     routes.ProductRoutes(r, productController)
 
     // Start the server
-    r.Run(":9090")
+    r.Run(":8080")
 }
 
